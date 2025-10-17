@@ -1,112 +1,220 @@
-name: Build Native Modulesname: Build Native Modules
+name: Build Native Modulesname: Build Native Modulesname: Build Native Modules
 
 
 
-on:on:
+on:
+
+  push:
+
+    tags:on:on:
+
+      - '*-v*'  # Matches tags like cryptween-daemon-v0.0.5, other-project-v1.2.3
 
   push:  push:
 
-    tags:    branches: [ main, master, development ]
+jobs:
 
-      - '*-v*'  # Matches tags like cryptween-daemon-v0.0.5, other-project-v1.2.3    tags: [ 'v*' ]
+  build:    tags:    branches: [ main, master, development ]
 
-  pull_request:
+    strategy:
 
-jobs:    branches: [ main, master ]
+      matrix:      - '*-v*'  # Matches tags like cryptween-daemon-v0.0.5, other-project-v1.2.3    tags: [ 'v*' ]
 
-  build:
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
-    strategy:jobs:
+        include:  pull_request:
 
-      matrix:  build-native-modules:
+          - os: windows-latest
+
+            platform: windowsjobs:    branches: [ main, master ]
+
+            arch: x64
+
+          - os: ubuntu-latest  build:
+
+            platform: linux
+
+            arch: x64    strategy:jobs:
+
+          - os: macos-latest
+
+            platform: macos      matrix:  build-native-modules:
+
+            arch: x64
 
         os: [windows-latest, ubuntu-latest, macos-latest]    name: Build native modules for ${{ matrix.os }}
 
+    runs-on: ${{ matrix.os }}
+
         include:    runs-on: ${{ matrix.os }}
 
-          - os: windows-latest    
+    steps:
+
+      - name: Checkout code          - os: windows-latest    
+
+        uses: actions/checkout@v4
 
             platform: windows    strategy:
 
-            arch: x64      matrix:
+      - name: Setup Node.js
 
-          - os: ubuntu-latest        include:
+        uses: actions/setup-node@v4            arch: x64      matrix:
 
-            platform: linux          - os: ubuntu-latest
+        with:
 
-            arch: x64            platform: linux
-
-          - os: macos-latest            arch: x64
-
-            platform: macos            node: 18
-
-            arch: x64          - os: windows-latest
-
-            platform: win32
-
-    runs-on: ${{ matrix.os }}            arch: x64
-
-            node: 18
-
-    steps:          - os: macos-latest
-
-      - name: Checkout code            platform: darwin
-
-        uses: actions/checkout@v4            arch: x64
-
-            node: 18
-
-      - name: Setup Node.js    
-
-        uses: actions/setup-node@v4    steps:
-
-        with:    - name: Checkout code
-
-          node-version: '18'      uses: actions/checkout@v4
+          node-version: '18'          - os: ubuntu-latest        include:
 
 
 
-      - name: Parse tag    - name: Setup Node.js ${{ matrix.node }}
+      - name: Parse tag            platform: linux          - os: ubuntu-latest
 
-        id: tag      uses: actions/setup-node@v4
+        id: tag
 
-        run: |      with:
+        run: |            arch: x64            platform: linux
 
-          TAG_NAME=${{ github.ref_name }}        node-version: ${{ matrix.node }}
+          TAG_NAME=${{ github.ref_name }}
 
-          PROJECT_NAME=$(echo "$TAG_NAME" | sed 's/-v[0-9].*//')        cache: 'npm'
+          PROJECT_NAME=$(echo "$TAG_NAME" | sed 's/-v[0-9].*//')          - os: macos-latest            arch: x64
 
           VERSION=$(echo "$TAG_NAME" | sed 's/.*-v//')
 
-          echo "project=$PROJECT_NAME" >> $GITHUB_OUTPUT    - name: Setup Python (for native builds)
+          echo "project=$PROJECT_NAME" >> $GITHUB_OUTPUT            platform: macos            node: 18
 
-          echo "version=$VERSION" >> $GITHUB_OUTPUT      uses: actions/setup-python@v4
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT      with:
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT            arch: x64          - os: windows-latest
 
-        shell: bash        python-version: '3.x'
+        shell: bash
 
+            platform: win32
 
+      - name: Create package.json for native modules
 
-      - name: Create temporary package.json    - name: Install Visual Studio Build Tools (Windows)
+        run: |    runs-on: ${{ matrix.os }}            arch: x64
 
-        run: |      if: matrix.os == 'windows-latest'
+          cat > package.json << EOF
 
-          cat > package.json << EOF      run: |
+          {            node: 18
 
-          {        choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools"
+            "name": "native-modules-builder",
 
-            "name": "${{ steps.tag.outputs.project }}",
+            "version": "1.0.0",    steps:          - os: macos-latest
 
-            "version": "${{ steps.tag.outputs.version }}",    - name: Install dependencies
+            "description": "Build native Node.js modules",
 
-            "dependencies": {      run: npm ci --only=production
+            "dependencies": {      - name: Checkout code            platform: darwin
 
               "sqlite3": "^5.1.6",
 
-              "bcrypt": "^5.1.1",    - name: Rebuild native modules
+              "bcrypt": "^5.1.1",        uses: actions/checkout@v4            arch: x64
 
-              "keytar": "^7.9.0"      run: npm rebuild sqlite3 bcrypt keytar
+              "keytar": "^7.9.0"
+
+            }            node: 18
+
+          }
+
+          EOF      - name: Setup Node.js    
+
+
+
+      - name: Install and compile native modules        uses: actions/setup-node@v4    steps:
+
+        run: npm install
+
+        with:    - name: Checkout code
+
+      - name: Prepare binaries
+
+        run: |          node-version: '18'      uses: actions/checkout@v4
+
+          mkdir -p binaries
+
+          # Find and copy native modules with better naming
+
+          find node_modules -name "*.node" -type f | while read file; do
+
+            # Get the module name from the path      - name: Parse tag    - name: Setup Node.js ${{ matrix.node }}
+
+            if echo "$file" | grep -q "sqlite3"; then
+
+              module_name="sqlite3"        id: tag      uses: actions/setup-node@v4
+
+            elif echo "$file" | grep -q "bcrypt"; then
+
+              module_name="bcrypt"          run: |      with:
+
+            elif echo "$file" | grep -q "keytar"; then
+
+              module_name="keytar"          TAG_NAME=${{ github.ref_name }}        node-version: ${{ matrix.node }}
+
+            else
+
+              # Fallback - try to extract module name from path          PROJECT_NAME=$(echo "$TAG_NAME" | sed 's/-v[0-9].*//')        cache: 'npm'
+
+              module_name=$(echo "$file" | sed 's|.*/node_modules/||' | cut -d'/' -f1)
+
+            fi          VERSION=$(echo "$TAG_NAME" | sed 's/.*-v//')
+
+            
+
+            # Copy with standardized naming          echo "project=$PROJECT_NAME" >> $GITHUB_OUTPUT    - name: Setup Python (for native builds)
+
+            cp "$file" "binaries/${{ matrix.platform }}-${{ matrix.arch }}-${module_name}.node"
+
+          done          echo "version=$VERSION" >> $GITHUB_OUTPUT      uses: actions/setup-python@v4
+
+        shell: bash
+
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT      with:
+
+      - name: List generated binaries
+
+        run: ls -la binaries/        shell: bash        python-version: '3.x'
+
+
+
+      - name: Upload binaries to release
+
+        uses: softprops/action-gh-release@v1
+
+        if: startsWith(github.ref, 'refs/tags/')      - name: Create temporary package.json    - name: Install Visual Studio Build Tools (Windows)
+
+        with:
+
+          files: binaries/*        run: |      if: matrix.os == 'windows-latest'
+
+          tag_name: ${{ steps.tag.outputs.tag }}
+
+          name: ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}          cat > package.json << EOF      run: |
+
+          body: |
+
+            Native modules for ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}          {        choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools"
+
+            
+
+            **Platforms:**            "name": "${{ steps.tag.outputs.project }}",
+
+            - Windows x64
+
+            - Linux x64              "version": "${{ steps.tag.outputs.version }}",    - name: Install dependencies
+
+            - macOS x64
+
+                        "dependencies": {      run: npm ci --only=production
+
+            **Available Modules:**
+
+            - sqlite3.node (SQLite3 database)              "sqlite3": "^5.1.6",
+
+            - bcrypt.node (Password hashing)
+
+            - keytar.node (System keychain access)              "bcrypt": "^5.1.1",    - name: Rebuild native modules
+
+        env:
+
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}              "keytar": "^7.9.0"      run: npm rebuild sqlite3 bcrypt keytar
 
             }
 
