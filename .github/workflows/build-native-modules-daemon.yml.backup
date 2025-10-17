@@ -1,0 +1,150 @@
+name: Build Native Modules
+
+on:
+  push:
+    tags:
+      - '*-v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: macos-latest
+            platform: macos
+            arch: x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Parse tag
+        id: tag
+        run: |
+          TAG_NAME=${{ github.ref_name }}
+          PROJECT_NAME=$(echo "$TAG_NAME" | sed 's/-v[0-9].*//')
+          VERSION=$(echo "$TAG_NAME" | sed 's/.*-v//')
+          echo "project=$PROJECT_NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Create package.json for native modules
+        run: |
+          node -e "
+            const pkg = {
+              name: 'native-modules-builder',
+              version: '1.0.0',
+              description: 'Build native Node.js modules',
+              dependencies: {
+                'sqlite3': '^5.1.6',
+                'bcrypt': '^5.1.1',
+                'keytar': '^7.9.0'
+              }
+            };
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+            console.log('Created package.json for native modules build');
+          "
+
+      - name: Install and compile native modules
+        run: npm install
+
+      - name: Prepare binaries
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Create binaries directory
+            if (!fs.existsSync('binaries')) fs.mkdirSync('binaries');
+            
+            // Function to find .node files recursively
+            function findNodeFiles(dir, files = []) {
+              const entries = fs.readdirSync(dir, { withFileTypes: true });
+              for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                  findNodeFiles(fullPath, files);
+                } else if (entry.name.endsWith('.node')) {
+                  files.push(fullPath);
+                }
+              }
+              return files;
+            }
+            
+            // Find all .node files
+            const nodeFiles = findNodeFiles('node_modules');
+            const platform = '${{ matrix.platform }}';
+            const arch = '${{ matrix.arch }}';
+            
+            // Copy files with proper naming
+            for (const file of nodeFiles) {
+              let moduleName = 'unknown';
+              if (file.includes('sqlite3')) moduleName = 'sqlite3';
+              else if (file.includes('bcrypt')) moduleName = 'bcrypt';
+              else if (file.includes('keytar')) moduleName = 'keytar';
+              else {
+                // Extract module name from path
+                const parts = file.split(path.sep);
+                const nodeModulesIndex = parts.indexOf('node_modules');
+                if (nodeModulesIndex >= 0 && nodeModulesIndex + 1 < parts.length) {
+                  moduleName = parts[nodeModulesIndex + 1];
+                }
+              }
+              
+              const targetFile = 'binaries/' + platform + '-' + arch + '-' + moduleName + '.node';
+              fs.copyFileSync(file, targetFile);
+              console.log('Copied: ' + file + ' -> ' + targetFile);
+            }
+            
+            console.log('Binary preparation completed');
+          "
+
+      - name: List generated binaries
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            console.log('Generated binaries:');
+            const files = fs.readdirSync('binaries');
+            files.forEach(file => {
+              const stats = fs.statSync(path.join('binaries', file));
+              console.log(file + ' (' + Math.round(stats.size/1024) + 'KB)');
+            });
+          "
+
+      - name: Upload binaries to release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: binaries/*
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}
+          body: |
+            Native modules for ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}
+            
+            **Platforms:**
+            - Windows x64
+            - Linux x64  
+            - macOS x64
+            
+            **Available Modules:**
+            - sqlite3.node (SQLite3 database)
+            - bcrypt.node (Password hashing)  
+            - keytar.node (System keychain access)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
