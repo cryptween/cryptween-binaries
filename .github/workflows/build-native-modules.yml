@@ -106,9 +106,9 @@ jobs:
                 }
               }
               
-              const targetFile = \`binaries/\${platform}-\${arch}-\${moduleName}.node\`;
+              const targetFile = 'binaries/' + platform + '-' + arch + '-' + moduleName + '.node';
               fs.copyFileSync(file, targetFile);
-              console.log(\`Copied: \${file} -> \${targetFile}\`);
+              console.log('Copied: ' + file + ' -> ' + targetFile);
             }
             
             console.log('Binary preparation completed');
@@ -123,7 +123,7 @@ jobs:
             const files = fs.readdirSync('binaries');
             files.forEach(file => {
               const stats = fs.statSync(path.join('binaries', file));
-              console.log(\`\${file} (\${Math.round(stats.size/1024)}KB)\`);
+              console.log(file + ' (' + Math.round(stats.size/1024) + 'KB)');
             });
           "
 
