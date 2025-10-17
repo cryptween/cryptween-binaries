@@ -61,7 +61,8 @@ jobs:
                 'web3-core-requestmanager': '1.10.4',
                 '@truffle/contract': '4.6.31',
                 '@truffle/hdwallet-provider': '2.1.15'
-              };
+              }
+            };
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
             console.log('Created package.json for native modules and web3 packages build');
           "
