@@ -49,21 +49,27 @@ jobs:
             const pkg = {
               name: 'native-modules-builder',
               version: '1.0.0',
-              description: 'Build native Node.js modules',
+              description: 'Build native Node.js modules and web3 packages',
               dependencies: {
                 'sqlite3': '^5.1.6',
                 'bcrypt': '^5.1.1',
-                'keytar': '^7.9.0'
-              }
-            };
+                'keytar': '^7.9.0',
+                'websocket': '1.0.35',
+                'web3': '1.10.4',
+                'web3-core': '1.10.4',
+                'web3-providers-ws': '1.10.4',
+                'web3-core-requestmanager': '1.10.4',
+                '@truffle/contract': '4.6.31',
+                '@truffle/hdwallet-provider': '2.1.15'
+              };
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-            console.log('Created package.json for native modules build');
+            console.log('Created package.json for native modules and web3 packages build');
           "
 
       - name: Install and compile native modules
         run: npm install
 
-      - name: Prepare binaries
+      - name: Prepare native binaries
         run: |
           node -e "
             const fs = require('fs');
@@ -111,19 +117,76 @@ jobs:
               console.log('Copied: ' + file + ' -> ' + targetFile);
             }
             
-            console.log('Binary preparation completed');
+            console.log('Native binary preparation completed');
           "
+
+      - name: Prepare web3 packages
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const { execSync } = require('child_process');
+            
+            const platform = '${{ matrix.platform }}';
+            const packagesToBundle = [
+              'websocket',
+              'web3',
+              'web3-core', 
+              'web3-providers-ws',
+              'web3-core-requestmanager',
+              '@truffle/contract',
+              '@truffle/hdwallet-provider'
+            ];
+            
+            console.log('Packaging web3-related modules...');
+            
+            for (const packageName of packagesToBundle) {
+              try {
+                // Create temp directory for this package
+                const tempDir = 'temp-' + packageName.replace('@', '').replace('/', '-');
+                if (fs.existsSync(tempDir)) {
+                  fs.rmSync(tempDir, { recursive: true, force: true });
+                }
+                fs.mkdirSync(tempDir);
+                
+                // Copy package from node_modules
+                const sourceDir = path.join('node_modules', packageName);
+                if (fs.existsSync(sourceDir)) {
+                  // Copy directory contents
+                  execSync('cp -r \"' + sourceDir + '/\"* \"' + tempDir + '/\"', { shell: true });
+                  
+                  // Create tarball
+                  const tarName = platform + '-' + packageName.replace('@', '').replace('/', '-') + '.tgz';
+                  execSync('tar -czf binaries/' + tarName + ' -C \"' + tempDir + '\" .', { shell: true });
+                  
+                  // Cleanup temp directory
+                  fs.rmSync(tempDir, { recursive: true, force: true });
+                  
+                  console.log('Packaged: ' + packageName + ' -> ' + tarName);
+                } else {
+                  console.log('Package not found: ' + packageName);
+                }
+              } catch (error) {
+                console.error('Error packaging ' + packageName + ':', error.message);
+              }
+            }
+            
+            console.log('Web3 package preparation completed');
+          "
+        shell: bash
 
       - name: List generated binaries
         run: |
           node -e "
             const fs = require('fs');
             const path = require('path');
-            console.log('Generated binaries:');
+            console.log('Generated binaries and packages:');
             const files = fs.readdirSync('binaries');
             files.forEach(file => {
               const stats = fs.statSync(path.join('binaries', file));
-              console.log(file + ' (' + Math.round(stats.size/1024) + 'KB)');
+              const sizeKB = Math.round(stats.size/1024);
+              const sizeMB = (stats.size/1024/1024).toFixed(1);
+              console.log(file + ' (' + (sizeKB > 1024 ? sizeMB + 'MB' : sizeKB + 'KB') + ')');
             });
           "
 
@@ -135,16 +198,27 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}
           body: |
-            Native modules for ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}
+            Native modules and web3 packages for ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}
             
             **Platforms:**
             - Windows x64
             - Linux x64  
             - macOS x64
             
-            **Available Modules:**
+            **Available Native Modules:**
             - sqlite3.node (SQLite3 database)
             - bcrypt.node (Password hashing)  
             - keytar.node (System keychain access)
+            
+            **Available Web3 Packages:**
+            - websocket.tgz (WebSocket package with crypto dependencies)
+            - web3.tgz (Web3 main library)
+            - web3-core.tgz (Web3 core functionality) 
+            - web3-providers-ws.tgz (WebSocket provider)
+            - web3-core-requestmanager.tgz (Request manager)
+            - truffle-contract.tgz (@truffle/contract package)
+            - truffle-hdwallet-provider.tgz (@truffle/hdwallet-provider package)
+            
+            These packages are pre-built to avoid crypto module bundling issues.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
