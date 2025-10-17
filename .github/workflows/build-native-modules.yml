@@ -1,0 +1,273 @@
+name: Build Native Modulesname: Build Native Modules
+
+
+
+on:on:
+
+  push:  push:
+
+    tags:    branches: [ main, master, development ]
+
+      - '*-v*'  # Matches tags like cryptween-daemon-v0.0.5, other-project-v1.2.3    tags: [ 'v*' ]
+
+  pull_request:
+
+jobs:    branches: [ main, master ]
+
+  build:
+
+    strategy:jobs:
+
+      matrix:  build-native-modules:
+
+        os: [windows-latest, ubuntu-latest, macos-latest]    name: Build native modules for ${{ matrix.os }}
+
+        include:    runs-on: ${{ matrix.os }}
+
+          - os: windows-latest    
+
+            platform: windows    strategy:
+
+            arch: x64      matrix:
+
+          - os: ubuntu-latest        include:
+
+            platform: linux          - os: ubuntu-latest
+
+            arch: x64            platform: linux
+
+          - os: macos-latest            arch: x64
+
+            platform: macos            node: 18
+
+            arch: x64          - os: windows-latest
+
+            platform: win32
+
+    runs-on: ${{ matrix.os }}            arch: x64
+
+            node: 18
+
+    steps:          - os: macos-latest
+
+      - name: Checkout code            platform: darwin
+
+        uses: actions/checkout@v4            arch: x64
+
+            node: 18
+
+      - name: Setup Node.js    
+
+        uses: actions/setup-node@v4    steps:
+
+        with:    - name: Checkout code
+
+          node-version: '18'      uses: actions/checkout@v4
+
+
+
+      - name: Parse tag    - name: Setup Node.js ${{ matrix.node }}
+
+        id: tag      uses: actions/setup-node@v4
+
+        run: |      with:
+
+          TAG_NAME=${{ github.ref_name }}        node-version: ${{ matrix.node }}
+
+          PROJECT_NAME=$(echo "$TAG_NAME" | sed 's/-v[0-9].*//')        cache: 'npm'
+
+          VERSION=$(echo "$TAG_NAME" | sed 's/.*-v//')
+
+          echo "project=$PROJECT_NAME" >> $GITHUB_OUTPUT    - name: Setup Python (for native builds)
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT      uses: actions/setup-python@v4
+
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT      with:
+
+        shell: bash        python-version: '3.x'
+
+
+
+      - name: Create temporary package.json    - name: Install Visual Studio Build Tools (Windows)
+
+        run: |      if: matrix.os == 'windows-latest'
+
+          cat > package.json << EOF      run: |
+
+          {        choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools"
+
+            "name": "${{ steps.tag.outputs.project }}",
+
+            "version": "${{ steps.tag.outputs.version }}",    - name: Install dependencies
+
+            "dependencies": {      run: npm ci --only=production
+
+              "sqlite3": "^5.1.6",
+
+              "bcrypt": "^5.1.1",    - name: Rebuild native modules
+
+              "keytar": "^7.9.0"      run: npm rebuild sqlite3 bcrypt keytar
+
+            }
+
+          }    - name: Create native modules package
+
+          EOF      shell: bash
+
+      run: |
+
+      - name: Install dependencies (compile native modules)        mkdir -p builds/${{ matrix.platform }}-${{ matrix.arch }}
+
+        run: npm install        
+
+        # Copy native modules with their binaries
+
+      - name: Prepare binaries        if [ "${{ matrix.platform }}" = "win32" ]; then
+
+        run: |          cp -r node_modules/sqlite3/build builds/${{ matrix.platform }}-${{ matrix.arch }}/sqlite3-build
+
+          mkdir -p binaries          cp -r node_modules/bcrypt/lib builds/${{ matrix.platform }}-${{ matrix.arch }}/bcrypt-lib
+
+          # Find and copy native modules          [ -d node_modules/keytar/build ] && cp -r node_modules/keytar/build builds/${{ matrix.platform }}-${{ matrix.arch }}/keytar-build || true
+
+          find node_modules -name "*.node" -type f | while read file; do        else
+
+            module_name=$(basename "$(dirname "$file")" | sed 's/@.*//')          cp -r node_modules/sqlite3/build builds/${{ matrix.platform }}-${{ matrix.arch }}/sqlite3-build
+
+            if [ "$module_name" = "binding" ] || [ "$module_name" = "lib" ]; then          cp -r node_modules/bcrypt/lib builds/${{ matrix.platform }}-${{ matrix.arch }}/bcrypt-lib
+
+              parent_dir=$(dirname "$(dirname "$file")")          [ -d node_modules/keytar/build ] && cp -r node_modules/keytar/build builds/${{ matrix.platform }}-${{ matrix.arch }}/keytar-build || true
+
+              module_name=$(basename "$parent_dir" | sed 's/@.*//')        fi
+
+            fi        
+
+            cp "$file" "binaries/${{ matrix.platform }}-${{ matrix.arch }}-${module_name}.node"        # Create metadata file
+
+          done        cat > builds/${{ matrix.platform }}-${{ matrix.arch }}/metadata.json << EOF
+
+        shell: bash        {
+
+          "platform": "${{ matrix.platform }}",
+
+      - name: List generated binaries          "arch": "${{ matrix.arch }}",
+
+        run: ls -la binaries/          "node_version": "${{ matrix.node }}",
+
+          "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+
+      - name: Upload binaries to release          "modules": {
+
+        uses: softprops/action-gh-release@v1            "sqlite3": "$(node -p "require('./package.json').dependencies.sqlite3")",
+
+        if: startsWith(github.ref, 'refs/tags/')            "bcrypt": "$(node -p "require('./package.json').dependencies.bcrypt")"
+
+        with:          }
+
+          files: binaries/*        }
+
+          tag_name: ${{ steps.tag.outputs.tag }}        EOF
+
+          name: ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}
+
+          body: |    - name: Create archive
+
+            Native modules for ${{ steps.tag.outputs.project }} v${{ steps.tag.outputs.version }}      shell: bash
+
+                  run: |
+
+            **Platforms:**        cd builds
+
+            - Windows x64        if [ "${{ matrix.platform }}" = "win32" ]; then
+
+            - Linux x64            7z a -tzip native-modules-${{ matrix.platform }}-${{ matrix.arch }}.zip ${{ matrix.platform }}-${{ matrix.arch }}/
+
+            - macOS x64        else
+
+                      tar -czf native-modules-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz ${{ matrix.platform }}-${{ matrix.arch }}/
+
+            **Modules:**        fi
+
+            - sqlite3.node
+
+            - bcrypt.node    - name: Upload artifacts
+
+            - keytar.node      uses: actions/upload-artifact@v3
+
+        env:      with:
+
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}        name: native-modules-${{ matrix.platform }}-${{ matrix.arch }}
+        path: builds/native-modules-${{ matrix.platform }}-${{ matrix.arch }}.*
+        retention-days: 30
+
+  create-release:
+    name: Create Release with Native Modules
+    needs: build-native-modules
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: ./artifacts
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Cryptween Daemon ${{ github.ref }}
+        body: |
+          ## Native Modules Build
+          
+          This release includes pre-compiled native modules for:
+          - 🐧 Linux x64
+          - 🪟 Windows x64  
+          - 🍎 macOS x64
+          
+          ### Installation
+          The setup scripts will automatically download the appropriate native modules for your platform.
+          
+          ### Manual Download
+          You can also manually download the native modules:
+          - [Linux x64 Native Modules](./native-modules-linux-x64.tar.gz)
+          - [Windows x64 Native Modules](./native-modules-win32-x64.zip)
+          - [macOS x64 Native Modules](./native-modules-darwin-x64.tar.gz)
+        draft: false
+        prerelease: false
+
+    - name: Upload Linux Native Modules
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/native-modules-linux-x64/native-modules-linux-x64.tar.gz
+        asset_name: native-modules-linux-x64.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload Windows Native Modules
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/native-modules-win32-x64/native-modules-win32-x64.zip
+        asset_name: native-modules-win32-x64.zip
+        asset_content_type: application/zip
+
+    - name: Upload macOS Native Modules
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/native-modules-darwin-x64/native-modules-darwin-x64.tar.gz
+        asset_name: native-modules-darwin-x64.tar.gz
+        asset_content_type: application/gzip
